@@ -1,5 +1,6 @@
 <?php
 namespace MiddleWares;
+
 class MWRouter
 {
     /**
@@ -28,16 +29,24 @@ class MWRouter
     protected $passData = null;
 
     /**
-     * 绑定命名空间的中间件
+     * 绑定前置命名空间的中间件
      */
     protected static $router = [];
+
+    /**
+     * 绑定后置命名空间的中间件
+     */
+    protected static $behindRouter = [];
 
     /**
      * 中间件组
      */
     protected static $group = [];
 
-    protected static $behind = [];
+    /**
+     * 后置中间件组
+     */
+    protected static $behindGroup = [];
 
     /**
      * 给命名空间绑定中间件
@@ -51,13 +60,12 @@ class MWRouter
                         self::bindAdd($namespace, (array)$middlewares);
                         break;
                     case 'group':
-                        self::bindAdd($namespace, self::$group[$namespace]);
+                        self::bindAdd($namespace, self::$group[$middlewares]);
                         break;
                     default:
                         break;
                 }
             }
-
         }
     }
 
@@ -84,11 +92,41 @@ class MWRouter
     /**
      * 添加后置中间件
      */
-    public static function behind($middlewares)
+    public static function behind($namespace, $params)
     {
-        if (!empty($middlewares)) {
-            $middlewares = (array)$middlewares;
-            self::$behind = array_merge(self::$behind, $middlewares);
+        if (!empty($namespace) && !empty($params) && is_array($params)) {
+            foreach ($params as $key => $middlewares) {
+                switch ($key) {
+                    case 'middleware':
+                        self::behindBindAdd($namespace, (array)$middlewares);
+                        break;
+                    case 'group':
+                        self::behindBindAdd($namespace, self::$behindGroup[$middlewares]);
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 添加后置中间件
+     */
+    protected static function behindBindAdd($namespace, $middlewares)
+    {
+        self::$behindRouter[$namespace] = !isset(self::$behindRouter[$namespace]) ?
+            $middlewares :
+            array_merge(self::$behindRouter[$namespace], $middlewares);
+    }
+
+    /**
+     * 设置后置中间件组
+     */
+    public static function behindGroup($groupAlias, $middlewares)
+    {
+        if (!empty($groupAlias) && !empty($middlewares) && is_array($middlewares)) {
+            self::$behindGroup[$groupAlias] = $middlewares;
         }
     }
 
@@ -129,6 +167,7 @@ class MWRouter
             $namespaceString = trim(str_replace("/", "\\", $this->namespace), " ");
             $namespaceSplit = explode('\\', $namespaceString);
             $throughMiddleWares = [];
+            $behindThroughMiddleWares = [];
             $temp = '';
             if (!empty($namespaceSplit)) {
                 //根据命名空间添加中间件
@@ -137,6 +176,9 @@ class MWRouter
                     if (isset(self::$router[$temp])) {
                         $throughMiddleWares = array_merge($throughMiddleWares, self::$router[$temp]);
                     }
+                    if (isset(self::$behindRouter[$temp])) {
+                        $behindThroughMiddleWares = array_merge($throughMiddleWares, self::$behindRouter[$temp]);
+                    }
                 }
                 //添加控制器方法执行前的中间件
                 if (!empty($temp) && !empty($this->method)) {
@@ -144,17 +186,24 @@ class MWRouter
                     if (isset(self::$router[$temp])) {
                         $throughMiddleWares = array_merge($throughMiddleWares, self::$router[$temp]);
                     }
+                    if (isset(self::$behindRouter[$temp])) {
+                        $behindThroughMiddleWares = array_merge($behindThroughMiddleWares, self::$behindRouter[$temp]);
+                    }
                 }
             }
             $this->preposeThroughMiddleWares = $throughMiddleWares;
+            $this->behindThroughMiddleWares = $behindThroughMiddleWares;
         }
+//        if (!empty(self::$behind)) {
+//            $this->behindThroughMiddleWares = self::$behind;
+//        }
         return $this;
     }
 
     /**
      * 开始处理
      */
-    public function then($lastFunction = null, $params = [])
+    public function then($lastFunction = null, $handle = null, $params = [])
     {
         array_reduce(
             $this->preposeThroughMiddleWares,
@@ -162,7 +211,10 @@ class MWRouter
             $this->passData);
         $passAble = $this->passData;
         if (is_callable($lastFunction)) {
-            $passAble = call_user_func_array($lastFunction, array_merge((array)$passAble, $params));
+            $passAble = call_user_func_array($lastFunction, array_merge([$passAble], $params));
+        }
+        if (is_callable($handle)) {
+            $passAble = call_user_func_array($handle, [$this->passData, $passAble]);
         }
         return array_reduce(
             $this->behindThroughMiddleWares,
@@ -177,19 +229,19 @@ class MWRouter
     protected function createWrapFunctions()
     {
         return function ($passData, $middleWare) {
+	
             if ($middleWare instanceof \Closure) {
-                return call_user_func($middleWare, $passData);
+                call_user_func($middleWare, $passData);
             } elseif (is_string($middleWare)) {
                 $class = MiddleWare::get($middleWare);
                 if (!is_null($class) &&
                     class_exists($class) &&
                     method_exists(new $class(), MiddleWare::getMethodName())
                 ) {
-                    return call_user_func_array([new $class(), MiddleWare::getMethodName()], [$passData]);
-                } else {
-                    return $passData;
+                    call_user_func_array([new $class(), MiddleWare::getMethodName()], [$passData]);
                 }
             }
+            return $passData;
         };
     }
 }

@@ -23,6 +23,10 @@ class MiddleWare
         }
     }
 
+    public static function getAll(){
+        return self::$middleWares;
+    }
+
     /**
      * 添加中间件
      */
@@ -65,7 +69,8 @@ class MiddleWare
     /**
      * 获取中间默认方法名
      */
-    public static function getMethodName(){
+    public static function getMethodName()
+    {
         return self::$method;
     }
 
