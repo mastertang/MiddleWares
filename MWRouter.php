@@ -1,8 +1,12 @@
 <?php
+
 namespace MiddleWares;
 
 class MWRouter
 {
+    const POSITION_PREPOST = "prepost";
+    const POSITION_BEHIND  = "behind";
+
     /**
      * 处理的命名空间
      */
@@ -14,14 +18,22 @@ class MWRouter
     protected $method = '';
 
     /**
-     * 保存通过的路由所有前置中间件
+     * 路由会通过的所有中间件
      */
-    protected $preposeThroughMiddleWares = [];
+    protected static $throughMiddleWares = [
+        "prepose" => [],
+        "behind"  => []
+    ];
 
     /**
-     * 保存请求执行后执行的后置中间件
+     * 路由不执行中间件
      */
-    protected $behindThroughMiddleWares = [];
+    protected static $exceptMiddleWares = [];
+
+    /**
+     * 运行时路由不执行的中间件
+     */
+    protected static $runtimeExceptMiddlewares = [];
 
     /**
      * 传递的数据
@@ -34,36 +46,56 @@ class MWRouter
     protected static $router = [];
 
     /**
-     * 绑定后置命名空间的中间件
-     */
-    protected static $behindRouter = [];
-
-    /**
      * 中间件组
      */
     protected static $group = [];
 
     /**
-     * 后置中间件组
-     */
-    protected static $behindGroup = [];
-
-    /**
      * 给命名空间绑定中间件
      */
-    public static function bind($namespace, $params)
+    public static function bind($middlewares, $groups = NULL)
     {
-        if (!empty($namespace) && !empty($params) && is_array($params)) {
-            foreach ($params as $key => $middlewares) {
-                switch ($key) {
-                    case 'middleware':
-                        self::bindAdd($namespace, (array)$middlewares);
-                        break;
-                    case 'group':
-                        self::bindAdd($namespace, self::$group[$middlewares]);
-                        break;
-                    default:
-                        break;
+        if (!empty($middlewares) && is_array($middlewares)) {
+            $prepostMiddlewares = isset($middlewares[self::POSITION_PREPOST]) ? $middlewares[self::POSITION_PREPOST] : [];
+            $behindMiddlewares  = isset($middlewares[self::POSITION_BEHIND]) ? $middlewares[self::POSITION_BEHIND] : [];
+            foreach ($prepostMiddlewares as $namespace => $middleware) {
+                if (is_string($middleware) && !empty($middleware)) {
+                    self::bindAdd($namespace, [$middleware], self::POSITION_PREPOST);
+                } elseif (is_array($middleware) && !empty($middleware)) {
+                    self::bindAdd($namespace, $middleware, self::POSITION_PREPOST);
+                }
+            }
+            foreach ($behindMiddlewares as $namespace => $middleware) {
+                if (is_string($middleware) && !empty($middleware)) {
+                    self::bindAdd($namespace, [$middleware], self::POSITION_BEHIND);
+                } elseif (is_array($middleware) && !empty($middleware)) {
+                    self::bindAdd($namespace, $middleware, self::POSITION_BEHIND);
+                }
+            }
+        }
+        if (!empty($groups) && is_array($groups)) {
+            $preposGroups = isset($groups[self::POSITION_PREPOST]) ? $groups[self::POSITION_PREPOST] : [];
+            $behindGroups = isset($groups[self::POSITION_BEHIND]) ? $groups[self::POSITION_BEHIND] : [];
+            foreach ($preposGroups as $namespace => $group) {
+                if (is_string($group) && !empty($group) && isset(self::$group[$group])) {
+                    self::bindAdd($namespace, self::$group[$group], self::POSITION_PREPOST);
+                } elseif (is_array($group) && !empty($group)) {
+                    foreach ($group as $alias) {
+                        if (isset(self::$group[$alias])) {
+                            self::bindAdd($namespace, self::$group[$alias], self::POSITION_PREPOST);
+                        }
+                    }
+                }
+            }
+            foreach ($behindGroups as $namespace => $group) {
+                if (is_string($group) && !empty($group) && isset(self::$group[$group])) {
+                    self::bindAdd($namespace, self::$group[$group], self::POSITION_BEHIND);
+                } elseif (is_array($group) && !empty($group)) {
+                    foreach ($group as $alias) {
+                        if (isset(self::$group[$alias])) {
+                            self::bindAdd($namespace, self::$group[$alias], self::POSITION_BEHIND);
+                        }
+                    }
                 }
             }
         }
@@ -72,62 +104,36 @@ class MWRouter
     /**
      * 添加中间件
      */
-    protected static function bindAdd($namespace, $middlewares)
+    protected static function bindAdd($namespace, $middlewares, $position)
     {
-        self::$router[$namespace] = !isset(self::$router[$namespace]) ?
+        self::$router[$namespace][$position] = !isset(self::$router[$namespace][$position]) ?
             $middlewares :
-            array_merge(self::$router[$namespace], $middlewares);
+            array_merge(self::$router[$namespace][$position], $middlewares);
     }
 
     /**
      * 设置中间件组
      */
-    public static function group($groupAlias, $middlewares)
+    public static function group($groupAlias)
     {
-        if (!empty($groupAlias) && !empty($middlewares) && is_array($middlewares)) {
-            self::$group[$groupAlias] = $middlewares;
-        }
-    }
-
-    /**
-     * 添加后置中间件
-     */
-    public static function behind($namespace, $params)
-    {
-        if (!empty($namespace) && !empty($params) && is_array($params)) {
-            foreach ($params as $key => $middlewares) {
-                switch ($key) {
-                    case 'middleware':
-                        self::behindBindAdd($namespace, (array)$middlewares);
-                        break;
-                    case 'group':
-                        self::behindBindAdd($namespace, self::$behindGroup[$middlewares]);
-                        break;
-                    default:
-                        break;
-                }
+        if (!empty($groupAlias) && is_array($groupAlias)) {
+            foreach ($groupAlias as $alias => $middleware) {
+                self::$group[$alias] = $middleware;
             }
         }
     }
 
     /**
-     * 添加后置中间件
+     * 为路由设置不需要的中间件
      */
-    protected static function behindBindAdd($namespace, $middlewares)
+    public static function except($namespace, $middlewares)
     {
-        self::$behindRouter[$namespace] = !isset(self::$behindRouter[$namespace]) ?
-            $middlewares :
-            array_merge(self::$behindRouter[$namespace], $middlewares);
-    }
-
-    /**
-     * 设置后置中间件组
-     */
-    public static function behindGroup($groupAlias, $middlewares)
-    {
-        if (!empty($groupAlias) && !empty($middlewares) && is_array($middlewares)) {
-            self::$behindGroup[$groupAlias] = $middlewares;
+        if (is_string($middlewares)) {
+            $middlewares = [$middlewares];
         }
+        self::$exceptMiddleWares[$namespace] = isset(self::$exceptMiddleWares[$namespace]) ?
+            $middlewares :
+            array_merge(self::$exceptMiddleWares[$namespace], $middlewares);
     }
 
     /**
@@ -164,39 +170,43 @@ class MWRouter
     public function through()
     {
         if (!empty($this->namespace)) {
-            $namespaceString = trim(str_replace("/", "\\", $this->namespace), " ");
-            $namespaceSplit = explode('\\', $namespaceString);
-            $throughMiddleWares = [];
-            $behindThroughMiddleWares = [];
-            $temp = '';
-            if (!empty($namespaceSplit)) {
+            $throughMiddleWares = [
+                self::POSITION_PREPOST => [],
+                self::POSITION_BEHIND  => []
+            ];
+            if (!empty($this->namespace)) {
                 //根据命名空间添加中间件
-                foreach ($namespaceSplit as $split) {
-                    $temp = empty($temp) ? $temp = $split : "{$temp}\\{$split}";
-                    if (isset(self::$router[$temp])) {
-                        $throughMiddleWares = array_merge($throughMiddleWares, self::$router[$temp]);
-                    }
-                    if (isset(self::$behindRouter[$temp])) {
-                        $behindThroughMiddleWares = array_merge($throughMiddleWares, self::$behindRouter[$temp]);
-                    }
+                if (!empty($this->method)) {
+                    $this->namespace[] = "::{$this->method}";
                 }
-                //添加控制器方法执行前的中间件
-                if (!empty($temp) && !empty($this->method)) {
-                    $temp .= "::{$this->method}";
+                foreach ($this->namespace as $split) {
+                    $temp = empty($temp) ? $split : "{$temp}\\{$split}";
                     if (isset(self::$router[$temp])) {
-                        $throughMiddleWares = array_merge($throughMiddleWares, self::$router[$temp]);
+                        if (isset(self::$router[$temp][self::POSITION_PREPOST])) {
+                            $throughMiddleWares[self::POSITION_PREPOST] =
+                                array_merge(
+                                    $throughMiddleWares[self::POSITION_PREPOST],
+                                    self::$router[$temp][self::POSITION_PREPOST]
+                                );
+                        }
+                        if (isset(self::$router[$temp][self::POSITION_BEHIND])) {
+                            $throughMiddleWares[self::POSITION_BEHIND] =
+                                array_merge(
+                                    $throughMiddleWares[self::POSITION_BEHIND],
+                                    self::$router[$temp][self::POSITION_BEHIND]
+                                );
+                        }
                     }
-                    if (isset(self::$behindRouter[$temp])) {
-                        $behindThroughMiddleWares = array_merge($behindThroughMiddleWares, self::$behindRouter[$temp]);
+                    if (isset(self::$exceptMiddlewares[$temp])) {
+                        self::$runtimeExceptMiddlewares = array_merge(
+                            self::$runtimeExceptMiddlewares,
+                            self::$exceptMiddleWares[$temp]
+                        );
                     }
                 }
             }
-            $this->preposeThroughMiddleWares = $throughMiddleWares;
-            $this->behindThroughMiddleWares = $behindThroughMiddleWares;
+            self::$throughMiddleWares = $throughMiddleWares;
         }
-//        if (!empty(self::$behind)) {
-//            $this->behindThroughMiddleWares = self::$behind;
-//        }
         return $this;
     }
 
@@ -206,7 +216,7 @@ class MWRouter
     public function then($lastFunction = null, $handle = null, $params = [])
     {
         array_reduce(
-            $this->preposeThroughMiddleWares,
+            self::$throughMiddleWares[self::POSITION_PREPOST],
             $this->createWrapFunctions(),
             $this->passData);
         $passAble = $this->passData;
@@ -217,7 +227,7 @@ class MWRouter
             $passAble = call_user_func_array($handle, [$this->passData, $passAble]);
         }
         return array_reduce(
-            $this->behindThroughMiddleWares,
+            self::$throughMiddleWares[self::POSITION_BEHIND],
             $this->createWrapFunctions(),
             $passAble
         );
@@ -229,12 +239,12 @@ class MWRouter
     protected function createWrapFunctions()
     {
         return function ($passData, $middleWare) {
-	
             if ($middleWare instanceof \Closure) {
                 call_user_func($middleWare, $passData);
-            } elseif (is_string($middleWare)) {
+            } elseif (is_string($middleWare) && !in_array(self::$runtimeExceptMiddlewares)) {
                 $class = MiddleWare::get($middleWare);
                 if (!is_null($class) &&
+                    !in_array(self::$runtimeExceptMiddlewares) &&
                     class_exists($class) &&
                     method_exists(new $class(), MiddleWare::getMethodName())
                 ) {
